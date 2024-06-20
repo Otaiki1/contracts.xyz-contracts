@@ -20,15 +20,11 @@ contract SoulBoundToken is ERC721URIStorage {
         return "hello";
     }
 
-    modifier onlyMinterContract() {
-        require(msg.sender == MinterContractAddress, "Caller is Invalid");
-        _;
-    }
 
     function safeMint(
         address to,
         string memory metadataURI
-    ) public onlyMinterContract {
+    ) public {
         uint256 tokenId = tokenIdCounter.current();
         tokenIdCounter.increment();
 

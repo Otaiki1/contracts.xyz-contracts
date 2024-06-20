@@ -1,67 +1,63 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity ^0.8.16;
 
-// Import the ERC-721 NFT contract interface
-import "./ISoulBoundToken.sol";
+interface ISoulBoundToken {
+    function safeMint(address to, string memory metadataURI) external;
+    function currentTokenId() external returns (uint);
+}
 
 contract AgreementContract {
-    // Address of the NFT contract
     address public nftContractAddress;
-
-    //address owner
     address immutable owner;
-
-    constructor() {
-        owner = msg.sender;
-    }
-
-    // Soul Bond NFT contract instance
     ISoulBoundToken public nftContract;
 
-    // Counter for agreement IDs
     uint256 public agreementCounter;
 
-    // Struct to represent an agreement
     struct Agreement {
         address party1;
         address party2;
         bool party1Signed;
         bool party2Signed;
-        uint256[] tokenIds;
-        string tokenUri; // Token ID of the soul-bound NFT
+        uint party1Id;
+        uint party2Id;
+        string tokenUri;
     }
 
-    // Mapping to store agreements by agreement ID
     mapping(uint256 => Agreement) public agreements;
-
     mapping(address => uint256[]) private initiator;
     mapping(address => uint256[]) private party;
 
-    // Event emitted when a new agreement is created
-    event AgreementCreated(uint256 agreementId, address party1, address party2);
+    event AgreementCreated(uint256 indexed agreementId, address indexed party1, address indexed party2, string tokenUri);
+    event AgreementSigned(uint256 indexed agreementId, address indexed party);
+    event AgreementMinted(uint256 indexed agreementId, address indexed party, uint256 indexed tokenId);
+    event AgreementDeleted(uint256 indexed agreementId, address indexed party1);
 
-    // Event emitted when an agreement is signed
-    event AgreementSigned(uint256 agreementId, address party);
+    error NotAllowed();
+    error InvalidParty();
+    error AlreadySigned();
+    error NotSignedByParty1();
+    error InvalidAgreementId();
+    error UnauthorizedDelete();
 
-    // Event emitted when an agreement is minted
-    event AgreementMinted(uint256 agreementId, address party);
+    constructor() {
+        owner = msg.sender;
+    }
 
-    // Function to create a new agreement and mint a Soul Bond NFT
+    modifier onlyOwner() {
+        if (msg.sender != owner) revert NotAllowed();
+        _;
+    }
+
     function createAgreement(address _party2, string memory _tokenUri) public {
         agreementCounter++;
 
-        // // Mint a new NFT and get the token ID
-        // uint256 tokenId = nftContract.mintSoulBoundNFT();
-
-        uint256[] memory _tokenIds;
-
-        // Create a new agreement
         Agreement memory newAgreement = Agreement({
             party1: msg.sender,
             party2: _party2,
-            party1Signed: false,
+            party1Signed: true,
             party2Signed: false,
-            tokenIds: _tokenIds,
+            party1Id: 0,
+            party2Id: 0,
             tokenUri: _tokenUri
         });
 
@@ -69,28 +65,14 @@ contract AgreementContract {
         initiator[msg.sender].push(agreementCounter);
         party[_party2].push(agreementCounter);
 
-        party1SignAgreement(agreementCounter);
-
-        // Emit an event for the new agreement
-        emit AgreementCreated(agreementCounter, msg.sender, _party2);
+        emit AgreementCreated(agreementCounter, msg.sender, _party2, _tokenUri);
     }
 
-    // Function for party1 to sign the agreement
-    function party1SignAgreement(uint256 _agreementId) private {
-        Agreement storage agreement = agreements[_agreementId];
-        require(msg.sender == agreement.party1, "You are not party1");
-        require(!agreement.party1Signed, "Party1 already signed");
-
-        agreement.party1Signed = true;
-        emit AgreementSigned(_agreementId, msg.sender);
-    }
-
-    // Function for party2 to sign the agreement
     function party2SignAgreement(uint256 _agreementId) public {
         Agreement storage agreement = agreements[_agreementId];
-        require(msg.sender == agreement.party2, "You are not party2");
-        require(agreement.party1Signed, "Party1 has not signed yet");
-        require(!agreement.party2Signed, "Party2 already signed");
+        if (msg.sender != agreement.party2) revert InvalidParty();
+        if (!agreement.party1Signed) revert NotSignedByParty1();
+        if (agreement.party2Signed) revert AlreadySigned();
 
         agreement.party2Signed = true;
         emit AgreementSigned(_agreementId, msg.sender);
@@ -98,38 +80,34 @@ contract AgreementContract {
 
     function mintNFTAgreement(uint256 _agreementId) public {
         Agreement storage agreement = agreements[_agreementId];
-        require(
-            msg.sender == agreement.party2 || msg.sender == agreement.party1,
-            "not allowed"
-        );
-        require(
-            agreement.party1Signed && agreement.party2Signed,
-            "A party hasnt signed"
-        );
+        if (msg.sender != agreement.party2 && msg.sender != agreement.party1) revert NotAllowed();
+        if (!agreement.party1Signed || !agreement.party2Signed) revert NotSignedByParty1();
 
         string memory metadataURI = agreement.tokenUri;
 
-        // Mint a new NFT and get the token ID
         nftContract.safeMint(msg.sender, metadataURI);
         uint256 tokenId = nftContract.currentTokenId();
+        if (agreement.party1 == msg.sender) {
+            agreement.party1Id = tokenId;
+        }
+        if (agreement.party2 == msg.sender) {
+            agreement.party2Id = tokenId;
+        }
 
-        agreement.tokenIds.push(tokenId);
-
-        emit AgreementMinted(_agreementId, msg.sender);
+        emit AgreementMinted(_agreementId, msg.sender, tokenId);
     }
 
-    // Function to get the details of an agreement
-    function getAgreementDetails(
-        uint256 _agreementId
-    ) public view returns (Agreement memory) {
-        require(
-            agreements[_agreementId].party1 != address(0),
-            "Invalid agreement ID"
-        );
+    function getAgreementDetails(uint256 _agreementId) public view returns (Agreement memory) {
+        if (agreements[_agreementId].party1 == address(0)) revert InvalidAgreementId();
         return agreements[_agreementId];
     }
 
-    //getUserAgreements
+    function deleteContract(uint256 _agreementId) public {
+        if (msg.sender != agreements[_agreementId].party1 || agreements[_agreementId].party2Signed) revert UnauthorizedDelete();
+        delete agreements[_agreementId];
+        // emit an event if needed
+    }
+
     function getParty1Agreements() public view returns (uint256[] memory) {
         return initiator[msg.sender];
     }
@@ -138,9 +116,8 @@ contract AgreementContract {
         return party[msg.sender];
     }
 
-    //function called by owner to set NFT contract address
-    function setNFTAddress(address _nftContractAddress) public {
-        require(msg.sender == owner, "not allowed");
+    function setNFTAddress(address _nftContractAddress) public onlyOwner {
+        nftContractAddress = _nftContractAddress;
         nftContract = ISoulBoundToken(_nftContractAddress);
     }
 }
