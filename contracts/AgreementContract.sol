@@ -39,14 +39,13 @@ contract AgreementContract {
     error InvalidAgreementId();
     error UnauthorizedDelete();
 
-    constructor() {
+    constructor(address _nftContractAddress) {
         owner = msg.sender;
+        nftContractAddress = _nftContractAddress;
+        nftContract = ISoulBoundToken(_nftContractAddress);
     }
 
-    modifier onlyOwner() {
-        if (msg.sender != owner) revert NotAllowed();
-        _;
-    }
+    
 
     function createAgreement(address _party2, string memory _tokenUri) public {
         agreementCounter++;
@@ -105,7 +104,8 @@ contract AgreementContract {
     function deleteContract(uint256 _agreementId) public {
         if (msg.sender != agreements[_agreementId].party1 || agreements[_agreementId].party2Signed) revert UnauthorizedDelete();
         delete agreements[_agreementId];
-        // emit an event if needed
+   
+        emit AgreementDeleted(_agreementId, msg.sender);
     }
 
     function getParty1Agreements() public view returns (uint256[] memory) {
@@ -116,8 +116,4 @@ contract AgreementContract {
         return party[msg.sender];
     }
 
-    function setNFTAddress(address _nftContractAddress) public onlyOwner {
-        nftContractAddress = _nftContractAddress;
-        nftContract = ISoulBoundToken(_nftContractAddress);
-    }
 }

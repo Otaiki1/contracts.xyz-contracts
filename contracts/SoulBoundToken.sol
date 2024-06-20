@@ -8,13 +8,10 @@ contract SoulBoundToken is ERC721URIStorage {
     using Counters for Counters.Counter;
     Counters.Counter private tokenIdCounter;
 
-    address immutable MinterContractAddress;
 
     uint256 public currentTokenId;
 
-    constructor(address minterContractAddress) ERC721("PrivyToken", "PTK") {
-        MinterContractAddress = minterContractAddress;
-    }
+    constructor() ERC721("PrivyToken", "PTK") {}
 
     function _baseURI() internal pure override returns (string memory) {
         return "https://ipfs.io/";
