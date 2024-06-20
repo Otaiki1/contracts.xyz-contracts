@@ -17,7 +17,7 @@ contract SoulBoundToken is ERC721URIStorage {
     }
 
     function _baseURI() internal pure override returns (string memory) {
-        return "hello";
+        return "https://ipfs.io/";
     }
 
 

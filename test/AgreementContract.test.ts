@@ -1,129 +1,143 @@
-import {
-  time,
-  loadFixture,
-} from "@nomicfoundation/hardhat-toolbox/network-helpers";
-import { anyValue } from "@nomicfoundation/hardhat-chai-matchers/withArgs";
+import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
 import { expect } from "chai";
 import { ethers } from "hardhat";
 
-describe("Lock", function () {
-  // We define a fixture to reuse the same setup in every test.
-  // We use loadFixture to run this setup once, snapshot that state,
-  // and reset Hardhat Network to that snapshot in every test.
-  async function deployOneYearLockFixture() {
-    const ONE_YEAR_IN_SECS = 365 * 24 * 60 * 60;
-    const ONE_GWEI = 1_000_000_000;
+describe("AgreementContract", function () {
+  async function deployContractsFixture() {
+    const [owner, party1, party2, otherAccount] = await ethers.getSigners();
 
-    const lockedAmount = ONE_GWEI;
-    const unlockTime = (await time.latest()) + ONE_YEAR_IN_SECS;
+    const SoulBoundToken = await ethers.getContractFactory("SoulBoundToken");
+    const soulBoundToken = await SoulBoundToken.deploy(owner.address);
+    // await soulBoundToken.deployed();
 
-    // Contracts are deployed using the first signer/account by default
-    const [owner, otherAccount] = await ethers.getSigners();
+    const AgreementContract = await ethers.getContractFactory("AgreementContract");
+    const agreementContract = await AgreementContract.deploy();
+    // await agreementContract.deployed();
 
-    const Lock = await ethers.getContractFactory("Lock");
-    const lock = await Lock.deploy(unlockTime, { value: lockedAmount });
-    const lockAddress = await lock.getAddress();
-    console.log("LOCK CONTRACT ADDRESS IS ----______", lockAddress);
+    await agreementContract.setNFTAddress(soulBoundToken.target);
 
-    return { lock, unlockTime, lockedAmount, owner, otherAccount };
+    return { agreementContract, soulBoundToken, owner, party1, party2, otherAccount };
   }
 
   describe("Deployment", function () {
-    it("Should set the right unlockTime", async function () {
-      const { lock, unlockTime } = await loadFixture(deployOneYearLockFixture);
-
-      expect(await lock.unlockTime()).to.equal(unlockTime);
-    });
-
-    it("Should set the right owner", async function () {
-      const { lock, owner } = await loadFixture(deployOneYearLockFixture);
-
-      expect(await lock.owner()).to.equal(owner.address);
-    });
-
-    it("Should receive and store the funds to lock", async function () {
-      const { lock, lockedAmount } = await loadFixture(
-        deployOneYearLockFixture
-      );
-
-      expect(await ethers.provider.getBalance(lock.target)).to.equal(
-        lockedAmount
-      );
-    });
-
-    it("Should fail if the unlockTime is not in the future", async function () {
-      // We don't use the fixture here because we want a different deployment
-      const latestTime = await time.latest();
-      const Lock = await ethers.getContractFactory("Lock");
-      await expect(Lock.deploy(latestTime, { value: 1 })).to.be.revertedWith(
-        "Unlock time should be in the future"
-      );
+    it("Should set the correct NFT contract address", async function () {
+      const { agreementContract, soulBoundToken } = await loadFixture(deployContractsFixture);
+      expect(await agreementContract.nftContract()).to.equal(soulBoundToken.target);
     });
   });
 
-  describe("Withdrawals", function () {
-    describe("Validations", function () {
-      it("Should revert with the right error if called too soon", async function () {
-        const { lock } = await loadFixture(deployOneYearLockFixture);
+  describe("Agreement Creation and Signing", function () {
+    it("Should create an agreement and sign by party1", async function () {
+      const { agreementContract, party1, party2 } = await loadFixture(deployContractsFixture);
+      const tokenURI = "https://example.com/token/1";
 
-        await expect(lock.withdraw()).to.be.revertedWith(
-          "You can't withdraw yet"
-        );
-      });
+      await agreementContract.connect(party1).createAgreement(party2.address, tokenURI);
 
-      it("Should revert with the right error if called from another account", async function () {
-        const { lock, unlockTime, otherAccount } = await loadFixture(
-          deployOneYearLockFixture
-        );
-
-        // We can increase the time in Hardhat Network
-        await time.increaseTo(unlockTime);
-
-        // We use lock.connect() to send a transaction from another account
-        await expect(lock.connect(otherAccount).withdraw()).to.be.revertedWith(
-          "You aren't the owner"
-        );
-      });
-
-      it("Shouldn't fail if the unlockTime has arrived and the owner calls it", async function () {
-        const { lock, unlockTime } = await loadFixture(
-          deployOneYearLockFixture
-        );
-
-        // Transactions are sent using the first signer by default
-        await time.increaseTo(unlockTime);
-
-        await expect(lock.withdraw()).not.to.be.reverted;
-      });
+      const agreement = await agreementContract.agreements(1);
+      expect(agreement.party1).to.equal(party1.address);
+      expect(agreement.party2).to.equal(party2.address);
+      expect(agreement.tokenUri).to.equal(tokenURI);
+      expect(agreement.party1Signed).to.be.true;
+      expect(agreement.party2Signed).to.be.false;
     });
 
-    describe("Events", function () {
-      it("Should emit an event on withdrawals", async function () {
-        const { lock, unlockTime, lockedAmount } = await loadFixture(
-          deployOneYearLockFixture
-        );
+    it("Should allow party2 to sign the agreement", async function () {
+      const { agreementContract, party1, party2 } = await loadFixture(deployContractsFixture);
+      const tokenURI = "https://example.com/token/1";
 
-        await time.increaseTo(unlockTime);
+      await agreementContract.connect(party1).createAgreement(party2.address, tokenURI);
+      await agreementContract.connect(party2).party2SignAgreement(1);
 
-        await expect(lock.withdraw())
-          .to.emit(lock, "Withdrawal")
-          .withArgs(lockedAmount, anyValue); // We accept any value as `when` arg
-      });
+      const agreement = await agreementContract.agreements(1);
+      expect(agreement.party2Signed).to.be.true;
     });
 
-    describe("Transfers", function () {
-      it("Should transfer the funds to the owner", async function () {
-        const { lock, unlockTime, lockedAmount, owner } = await loadFixture(
-          deployOneYearLockFixture
-        );
+    it("Should not allow other accounts to sign the agreement", async function () {
+      const { agreementContract, party1, party2, otherAccount } = await loadFixture(deployContractsFixture);
+      const tokenURI = "https://example.com/token/1";
 
-        await time.increaseTo(unlockTime);
+      await agreementContract.connect(party1).createAgreement(party2.address, tokenURI);
 
-        await expect(lock.withdraw()).to.changeEtherBalances(
-          [owner, lock],
-          [lockedAmount, -lockedAmount]
-        );
-      });
+      await expect(agreementContract.connect(otherAccount).party2SignAgreement(1))
+        .to.be.revertedWithCustomError(agreementContract, "InvalidParty()")
     });
+  });
+
+  describe("Minting NFT", function () {
+    it("Should mint an NFT after both parties sign", async function () {
+      const { agreementContract, soulBoundToken, party1, party2 } = await loadFixture(deployContractsFixture);
+      const tokenURI = "https://example.com/token/1";
+
+      await agreementContract.connect(party1).createAgreement(party2.address, tokenURI);
+      await agreementContract.connect(party2).party2SignAgreement(1);
+
+      await agreementContract.connect(party1).mintNFTAgreement(1);
+      await agreementContract.connect(party2).mintNFTAgreement(1);
+
+      const agreement = await agreementContract.agreements(1);
+      console.log("Agreements ----_______-----", agreement)
+      expect(agreement.party1Id).to.equal(0);
+      expect(agreement.party2Id).to.equal(1);
+      const tokenId = agreement.party1Id;
+      expect(await soulBoundToken.ownerOf(tokenId)).to.equal(party1.address);
+    });
+
+    it("Should not mint an NFT if both parties have not signed", async function () {
+      const { agreementContract, party1, party2 } = await loadFixture(deployContractsFixture);
+      const tokenURI = "https://example.com/token/1";
+
+      await agreementContract.connect(party1).createAgreement(party2.address, tokenURI);
+
+      await expect(agreementContract.connect(party1).mintNFTAgreement(1))
+        .to.be.revertedWithCustomError(agreementContract, "NotSignedByParty1()");
+    });
+  });
+
+  describe("Delete Agreement", function () {
+    it("Should delete an agreement by party1 if party2 hasn't signed", async function () {
+      const { agreementContract, party1, party2 } = await loadFixture(deployContractsFixture);
+      const tokenURI = "https://example.com/token/1";
+
+      await agreementContract.connect(party1).createAgreement(party2.address, tokenURI);
+      await agreementContract.connect(party1).deleteContract(1);
+
+      await expect(agreementContract.getAgreementDetails(1)).to.be.revertedWithCustomError(agreementContract, "InvalidAgreementId()");
+    });
+
+    it("Should not allow non-party1 to delete an agreement", async function () {
+      const { agreementContract, party1, party2, otherAccount } = await loadFixture(deployContractsFixture);
+      const tokenURI = "https://example.com/token/1";
+
+      await agreementContract.connect(party1).createAgreement(party2.address, tokenURI);
+
+      await expect(agreementContract.connect(otherAccount).deleteContract(1))
+        .to.be.revertedWithCustomError(agreementContract, "UnauthorizedDelete()");
+    });
+
+    it("Should not allow party1 to delete an agreement if party2 has signed", async function () {
+      const { agreementContract, party1, party2 } = await loadFixture(deployContractsFixture);
+      const tokenURI = "https://example.com/token/1";
+
+      await agreementContract.connect(party1).createAgreement(party2.address, tokenURI);
+      await agreementContract.connect(party2).party2SignAgreement(1);
+
+      await expect(agreementContract.connect(party1).deleteContract(1))
+        .to.be.revertedWithCustomError(agreementContract, "UnauthorizedDelete()");
+    });
+  });
+
+  describe("SoulBoundToken", function () {
+    it("Should mint an NFT with the correct metadata URI", async function () {
+      const { soulBoundToken, owner } = await loadFixture(deployContractsFixture);
+      const metadataURI = "testtest";
+      const finalURI = "https://ipfs.io/testtest"
+      await soulBoundToken.safeMint(owner.address, metadataURI);
+
+      const tokenId = await soulBoundToken.currentTokenId();
+
+      expect(await soulBoundToken.tokenURI(tokenId)).to.equal(finalURI);
+    });
+
+    
   });
 });
