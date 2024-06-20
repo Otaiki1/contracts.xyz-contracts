@@ -1,27 +1,21 @@
 const hre = require("hardhat");
 
 async function main() {
-  const Agreement = await hre.ethers.deployContract("AgreementContract", []);
+ 
 
-  await Agreement.waitForDeployment();
-
-  console.log(`Agreement contract deployed to ${Agreement.target}`);
-
-  const SBT = await hre.ethers.deployContract("SoulBoundToken", [
-    Agreement.target,
-  ]);
+  const SBT = await hre.ethers.deployContract("SoulBoundToken");
 
   await SBT.waitForDeployment();
 
   console.log(`SBT contract deployed to ${SBT.target}`);
 
-  //now we must immediately initialize the nft contract address into our Agreement
-  try {
-    const tx = await Agreement.setNFTAddress(SBT.target);
-    console.log("TX DONE ______", tx);
-  } catch (err) {
-    console.log(err);
-  }
+   const Agreement = await hre.ethers.deployContract("AgreementContract", [SBT.target]);
+
+  await Agreement.waitForDeployment();
+
+  console.log(`Agreement contract deployed to ${Agreement.target}`);
+
+  
 }
 
 //DEFAULT BY HARDHAT:
