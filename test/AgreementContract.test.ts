@@ -7,14 +7,14 @@ describe("AgreementContract", function () {
     const [owner, party1, party2, otherAccount] = await ethers.getSigners();
 
     const SoulBoundToken = await ethers.getContractFactory("SoulBoundToken");
-    const soulBoundToken = await SoulBoundToken.deploy(owner.address);
+    const soulBoundToken = await SoulBoundToken.deploy();
     // await soulBoundToken.deployed();
 
     const AgreementContract = await ethers.getContractFactory("AgreementContract");
-    const agreementContract = await AgreementContract.deploy();
+    const agreementContract = await AgreementContract.deploy(soulBoundToken.target);
     // await agreementContract.deployed();
 
-    await agreementContract.setNFTAddress(soulBoundToken.target);
+    // await agreementContract.setNFTAddress(soulBoundToken.target);
 
     return { agreementContract, soulBoundToken, owner, party1, party2, otherAccount };
   }
